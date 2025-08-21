@@ -8,6 +8,7 @@ from app.model.metadata.dto import (
     TableProperties,
 )
 from app.model.metadata.metadata import Metadata
+import re
 
 
 class ClickHouseMetadata(Metadata):
@@ -77,12 +78,28 @@ class ClickHouseMetadata(Metadata):
         return f"{schema}.{table}"
 
     def _transform_column_type(self, data_type):
-        # lower case the data_type
+        original_type = data_type
         data_type = data_type.lower()
 
-        # Map ClickHouse types to RustWrenEngineColumnType
+        # Array check return UNKNOWN (Wren does not support arrays)
+        if data_type.startswith("array("):
+            print(f"Ignoring unsupported array type: {data_type}")
+            return RustWrenEngineColumnType.UNKNOWN
+
+        # Unwrap nested nullable, lowcardinality, etc
+        while True:
+            match = re.match(r'(nullable|lowcardinality|nothing)\((.*)\)', data_type)
+            if match:
+                data_type = match.group(2)
+            else:
+                break
+
+        # Remove parameters like decimal(38,8), datetime64(3), etc
+        data_type = re.sub(r'\(.*\)', '', data_type)
+
         switcher = {
             "boolean": RustWrenEngineColumnType.BOOL,
+            "bool": RustWrenEngineColumnType.BOOL,
             "int8": RustWrenEngineColumnType.TINYINT,
             "uint8": RustWrenEngineColumnType.INT2,
             "int16": RustWrenEngineColumnType.INT2,
@@ -96,6 +113,7 @@ class ClickHouseMetadata(Metadata):
             "decimal": RustWrenEngineColumnType.DECIMAL,
             "date": RustWrenEngineColumnType.DATE,
             "datetime": RustWrenEngineColumnType.TIMESTAMP,
+            "datetime64": RustWrenEngineColumnType.TIMESTAMP,
             "string": RustWrenEngineColumnType.VARCHAR,
             "fixedstring": RustWrenEngineColumnType.CHAR,
             "uuid": RustWrenEngineColumnType.UUID,
@@ -105,4 +123,7 @@ class ClickHouseMetadata(Metadata):
             "ipv6": RustWrenEngineColumnType.INET,
         }
 
-        return switcher.get(data_type, RustWrenEngineColumnType.UNKNOWN)
+        mapped = switcher.get(data_type, RustWrenEngineColumnType.UNKNOWN)
+        if mapped == RustWrenEngineColumnType.UNKNOWN:
+            print(f"Unmapped type: {original_type}")
+        return mapped

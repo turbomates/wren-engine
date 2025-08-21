@@ -1,5 +1,6 @@
 import base64
 import importlib
+import ipaddress
 import os
 import time
 from contextlib import closing, suppress
@@ -135,7 +136,21 @@ class SimpleConnector:
                     result_table=result_table, col_name=name
                 )
 
+        # Convert IP address objects to strings for compatibility
+        result_table = self._cast_ip_address_objects(result_table)
+
         return result_table
+
+    def _cast_ip_address_objects(self, ibis_table: Table) -> Table:
+        try:
+            df = ibis_table.to_pandas()
+            
+            for col_name in df.columns:
+                if df[col_name].apply(lambda x: isinstance(x, (ipaddress.IPv4Address, ipaddress.IPv6Address)) if x is not None else False).any():
+                    df[col_name] = df[col_name].apply(lambda x: str(x) if isinstance(x, (ipaddress.IPv4Address, ipaddress.IPv6Address)) else x)
+            return ibis.memtable(df)
+        except Exception:
+            return ibis_table
 
     def _cast_uuid_columns(self, result_table: Table, col_name: str) -> Table:
         col = result_table[col_name]
